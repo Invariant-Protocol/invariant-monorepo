@@ -9,6 +9,8 @@
 mod db;
 mod impls; 
 mod state;
+mod tls;
+mod auth;
 mod handlers;
 mod error_response; 
 mod api_docs;      
@@ -20,7 +22,6 @@ use std::time::Duration;
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-// 🛡️ Added IdentityStorage to scope for run_reaper / get_late_fcm_tokens
 use invariant_engine::{InvariantEngine, IdentityStorage, core::EngineConfig};
 use invariant_shared::Network;
 use crate::db::PostgresStorage;
@@ -64,8 +65,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. Redis Connection
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
     let redis_client = redis::Client::open(redis_url)?;
-
-    // 🛡️ Initialize Atomic Nonce Manager
     let nonce_manager = RedisNonceManager { client: redis_client.clone() };
 
     // 5. App Configuration
@@ -92,12 +91,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = PostgresStorage::new(pool.clone());
     let engine_config = EngineConfig { network, genesis_version };
     
-    // 🛡️ INJECT BOTH STORAGES
     let engine = InvariantEngine::new(storage, nonce_manager, engine_config);
     
     let state = Arc::new(AppState { 
         engine,
         redis: redis_client,
+        pool: pool.clone(),
     });
 
     // 7. Background Worker (Reaper + Wake Up Call)
@@ -107,12 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             interval.tick().await;
             
-            // A. Wake Up Call
             match worker_storage.get_late_fcm_tokens(24 * 60).await {
                 Ok(tokens) => {
                     if !tokens.is_empty() {
                         tracing::info!("🔔 Waking up {} late nodes...", tokens.len());
-                        // Fixed loop to own the string
                         for token in tokens {
                             let t = token.clone(); 
                             tokio::spawn(async move {
@@ -124,7 +121,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => tracing::error!("Failed to fetch late tokens: {}", e),
             }
 
-            // B. Reaper
             if let Err(e) = worker_storage.run_reaper().await {
                 tracing::error!("Reaper failed: {}", e);
             }
@@ -133,16 +129,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 8. Launch API Server
     let app = handlers::app_router(state);
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
     
-    tracing::info!(event = "server_listening", address = %addr, "Invariant Node Online");
+    tracing::info!(event = "server_listening", address = %addr, "Invariant mTLS Server actively listening");
     
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    
-    axum::serve(
-        listener, 
-        app.into_make_service_with_connect_info::<SocketAddr>()
-    ).await?;
+    let config = tls::build_tls_config(
+        "certs/server.crt",
+        "certs/server.key",
+        "certs/ca.crt"
+    );
+    let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(config));
+
+    // Uses the updated axum-server v0.8 to bind safely to Axum v0.7
+    axum_server::bind_rustls(addr, tls_config)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .await?;
 
     Ok(())
 }

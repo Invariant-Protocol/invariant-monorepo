@@ -1,7 +1,6 @@
-# Dockerfile.release
 # 1. Build Stage
-# 🚀 FIX: Use 'latest-rust-1' to support new crates (like 'home') using Edition 2024
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+# 🚀 FIX: Pin to 'bookworm' to ensure glibc 2.36 parity across stages
+FROM lukemathwalker/cargo-chef:latest-rust-1-bookworm AS chef
 WORKDIR /app
 
 FROM chef AS planner
@@ -10,17 +9,31 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-# Build dependencies - this is the caching layer!
+# Build dependencies
 RUN cargo chef cook --release --recipe-path recipe.json
+
 # Build application
 COPY . .
+
+# 🔒 ENABLE SQLX OFFLINE MODE
+ENV SQLX_OFFLINE=true
+
 RUN cargo build --release --bin invariant_server
 
 # 2. Runtime Stage
+# 🚀 FIX: Must match the builder's OS (Debian 12 Bookworm)
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
-# Install OpenSSL, CA certs, and Redis client
-RUN apt-get update && apt-get install -y openssl ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    openssl \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the binary from the builder stage
 COPY --from=builder /app/target/release/invariant_server /usr/local/bin/
+
+# Default Execution
 CMD ["/usr/local/bin/invariant_server"]

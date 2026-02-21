@@ -5,7 +5,7 @@
  * This source code is licensed under the Business Source License (BSL 1.1) 
  * found in the LICENSE.md file in the root directory of this source tree.
  */
-use axum::{Router, routing::{get, post}, extract::Path, http::{StatusCode, HeaderValue, header}, Extension, Json};
+use axum::{Router, routing::{get, post}, extract::Path, http::{StatusCode, HeaderValue, header}, Extension, Json, middleware};
 use crate::state::SharedState;
 use uuid::Uuid;
 use invariant_engine::IdentityStorage;
@@ -29,6 +29,7 @@ use crate::api_docs::ApiDoc;
 pub mod genesis;
 pub mod heartbeat;
 pub mod identity;
+use crate::auth;
 
 async fn check_identity_handler(
     Path(id): Path<Uuid>,
@@ -36,7 +37,6 @@ async fn check_identity_handler(
 ) -> impl axum::response::IntoResponse {
     match state.engine.get_storage().get_identity(&id).await {
         Ok(Some(identity)) => {
-            // Next available = 23 Hours (1380 mins)
             let next_available = identity.last_heartbeat + Duration::minutes(1380);
             (
                 StatusCode::OK,
@@ -49,7 +49,6 @@ async fn check_identity_handler(
                     "username": identity.username, 
                     "is_genesis_eligible": identity.is_genesis_eligible,
                     "next_available": next_available.to_rfc3339(),
-                    // 🛡️ Expose Trust Timer so Client knows when to re-attest
                     "last_attestation": identity.last_attestation.to_rfc3339()
                 }))
             )
@@ -80,29 +79,32 @@ pub fn app_router(state: SharedState) -> Router {
             HeaderValue::from_static("DENY"),
         ));
 
-    // 3. Router
+    // 3. Isolate Sensitive Endpoints (Fail-Closed)
+    let sensitive_routes = Router::new()
+        .route("/genesis", post(genesis::genesis_handler))
+        .route("/verify", post(genesis::verify_stateless_handler)) 
+        .route("/heartbeat", post(heartbeat::heartbeat_handler))
+        .route("/identity/reattest", post(identity::reattest_handler))
+        .layer(middleware::from_fn(auth::verify_hmac_middleware));
+
+    // 4. Master Router
     Router::new()
         // Swagger UI
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         
+        // Fail-Open & Telemetry Endpoints
         .route("/health", get(|| async { "Invariant Node Online" }))
-        .route("/genesis", post(genesis::genesis_handler))
-        .route("/verify", post(genesis::verify_stateless_handler)) 
-        
-        // Heartbeat (Challenge + Action)
-        .route("/heartbeat", post(heartbeat::heartbeat_handler))
         .route("/heartbeat/challenge", get(heartbeat::get_heartbeat_challenge_handler))
-
-        // Identity Management
+        .route("/genesis/challenge", get(genesis::get_challenge_handler))
         .route("/identity/:id", get(check_identity_handler))
-        .route("/identity/:id/manifest", get(identity::get_manifest_handler)) // 👈 NEW
-        .route("/identity/reattest", post(identity::reattest_handler))       // 👈 NEW
-        
+        .route("/identity/:id/manifest", get(identity::get_manifest_handler))
         .route("/identity/claim_username", post(identity::claim_username_handler))
         .route("/identity/push_token", post(identity::update_push_token_handler))
         .route("/leaderboard", get(identity::get_leaderboard_handler))
-        .route("/genesis/challenge", get(genesis::get_challenge_handler))
         
+        // Merge Authenticated Routes
+        .merge(sensitive_routes)
+
         // Middleware Stack (Bottom runs first)
         .layer(
             ServiceBuilder::new()

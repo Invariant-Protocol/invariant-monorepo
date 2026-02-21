@@ -34,3 +34,8 @@ gcp_auth = { workspace = true }
 tower = { workspace = true }
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
+hmac = { workspace = true }
+ring = { workspace = true }
+axum-server = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }

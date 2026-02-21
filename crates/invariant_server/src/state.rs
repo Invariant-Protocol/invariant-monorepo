@@ -9,13 +9,14 @@
 use std::sync::Arc;
 use invariant_engine::InvariantEngine;
 use crate::db::PostgresStorage;
-use crate::impls::RedisNonceManager; // 👈 NEW
+use crate::impls::RedisNonceManager;
 use redis::Client as RedisClient;
+use sqlx::PgPool;
 
 pub type SharedState = Arc<AppState>;
 
 pub struct AppState {
-    // 🛡️ Update Type Signature: Now accepts TWO generic implementations
     pub engine: InvariantEngine<PostgresStorage, RedisNonceManager>,
     pub redis: RedisClient,
+    pub pool: PgPool, 
 }

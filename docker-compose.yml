@@ -1,4 +1,4 @@
-version: '3.8'
+# docker-compose.yml
 
 services:
   db:
@@ -10,7 +10,6 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # 🔒 SECURITY: Bind to localhost only so internet cannot access DB port directly
     ports:
       - "127.0.0.1:5433:5432"
     healthcheck:
@@ -18,13 +17,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    # Performance tuning for production
     command: postgres -c shared_buffers=128MB -c max_connections=75
 
   redis:
     image: redis:7-alpine
     restart: always
-    # No ports mapped = Internal access only (Security)
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,28 +34,25 @@ services:
       dockerfile: Dockerfile.release
     restart: always
     
-    # 🔒 MOUNTS: This ensures the server can find the key we uploaded via SCP
+    # 🔒 MOUNTS: Mount both Firebase and the mTLS Certificates
     volumes:
       - /home/ubuntu/firebase_credentials.json:/app/firebase_credentials.json:ro
+      - /home/ubuntu/certs:/app/certs:ro
 
     environment:
-      # Infrastructure
       DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/invariant
       REDIS_URL: redis://redis:6379
       
-      # App Config
       RUST_LOG: invariant_server=info,tower_http=info
-      # 🚀 FIXED: Set to 'testnet' as requested
       INVARIANT_NETWORK: testnet 
       INVARIANT_GENESIS_VERSION: 1
       
-      # Firebase / Push (Matches the volume mount above)
       FIREBASE_SERVICE_ACCOUNT_PATH: /app/firebase_credentials.json
-      # Ensure this is set in your .env file on the server
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
 
+    # Binding to 8443 as configured in main.rs for mTLS
     ports:
-      - "3000:3000"
+      - "8443:8443"
     
     depends_on:
       db:
@@ -66,7 +60,6 @@ services:
       redis:
         condition: service_healthy
 
-    # 🛡️ RESOURCE LIMITS (Anti-OOM Killer)
     deploy:
       resources:
         limits:
