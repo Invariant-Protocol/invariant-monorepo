@@ -48,3 +48,4 @@ crates/invariant_admin
 # Ignore environment-specific secrets
 .env
 firebase_credentials.json
+/certs_backup_legacy

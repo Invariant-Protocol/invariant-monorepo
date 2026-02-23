@@ -34,7 +34,12 @@ services:
       dockerfile: Dockerfile.release
     restart: always
     
-    # 🔒 MOUNTS: Mount both Firebase and the mTLS Certificates
+    # 🛡️ INJECT ENVIRONMENT VARIABLES
+    # This loads the .env file that was uploaded via your deploy script
+    # and makes ADMIN_API_SECRET available to the Rust binary.
+    env_file:
+      - .env
+
     volumes:
       - /home/ubuntu/firebase_credentials.json:/app/firebase_credentials.json:ro
       - /home/ubuntu/certs:/app/certs:ro
@@ -50,7 +55,6 @@ services:
       FIREBASE_SERVICE_ACCOUNT_PATH: /app/firebase_credentials.json
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
 
-    # Binding to 8443 as configured in main.rs for mTLS
     ports:
       - "8443:8443"
     

@@ -1,28 +1,47 @@
 // invariant_sdk/lib/src/api_client.dart
+
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'dart:math';
+import 'package:http/io_client.dart';
+import 'package:crypto/crypto.dart';
 
 class ApiClient {
   final String apiKey;
+  final String hmacSecret;
   final String baseUrl;
+  late final IOClient _client;
   
-  // ⚡ FAIL-OPEN REQUIREMENT: Strict timeout
   static const Duration kNetworkTimeout = Duration(seconds: 4);
 
-  ApiClient({required this.apiKey, String? baseUrl}) 
-      : baseUrl = baseUrl ?? "http://16.171.151.222:3000"; 
+  ApiClient({
+    required this.apiKey,
+    required this.hmacSecret,
+    required String clientCertPem,
+    required String clientPrivateKeyPem,
+    String? baseUrl,
+  }) : baseUrl = baseUrl ?? "https://16.171.151.222:8443" {
+    
+    final context = SecurityContext(withTrustedRoots: true);
+    
+    try {
+      context.useCertificateChainBytes(utf8.encode(clientCertPem));
+      context.usePrivateKeyBytes(utf8.encode(clientPrivateKeyPem));
+    } catch (e) {
+      // Failsafe: Allows the SDK example app to boot with mock string values 
+      // without throwing a native TLS parsing exception.
+    }
+    
+    final httpClient = HttpClient(context: context)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => false;
 
-  /// Requests a fresh nonce for hardware attestation.
+    _client = IOClient(httpClient);
+  }
+
   Future<String?> getChallenge() async {
     try {
-      // 1. Headers: Authorization standard
-      final headers = {
-        'Authorization': 'Bearer $apiKey',
-      };
-
-      final response = await http.get(
-        Uri.parse('$baseUrl/genesis/challenge'),
-        headers: headers,
+      final response = await _client.get(
+        Uri.parse('$baseUrl/heartbeat/challenge')
       ).timeout(kNetworkTimeout);
 
       if (response.statusCode == 200) {
@@ -34,22 +53,51 @@ class ApiClient {
     }
   }
 
-  /// Submits the hardware attestation chain.
-  Future<Map<String, dynamic>?> verify(Map<String, dynamic> payload) async {
-    try {
-      final headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
-      };
+  Map<String, String> _buildSecureHeaders(String method, String path, String bodyString) {
+    final timestamp = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+    final nonce = _generateNonce();
+    
+    final bodyBytes = utf8.encode(bodyString);
+    final bodyHash = sha256.convert(bodyBytes).toString();
+    
+    final host = Uri.parse(baseUrl).host;
+    final canonicalString = "$method\n$path\n\nhost:$host\n$bodyHash\n$timestamp\n$nonce";
+    
+    final hmacKey = utf8.encode(hmacSecret);
+    final hmacBytes = utf8.encode(canonicalString);
+    final hmac = Hmac(sha256, hmacKey);
+    final signature = hmac.convert(hmacBytes).toString();
 
-      final response = await http.post(
-        Uri.parse('$baseUrl/verify'), 
+    return {
+      'Content-Type': 'application/json',
+      'X-Invariant-ApiKey': apiKey,
+      'X-Invariant-Timestamp': timestamp,
+      'X-Invariant-Nonce': nonce,
+      'X-Invariant-Signature': signature,
+    };
+  }
+
+  Future<Map<String, dynamic>?> verify(Map<String, dynamic> payload, {bool isOfflineFallback = false}) async {
+    try {
+      const path = '/verify'; // Fixed: prefer_const_declarations
+      final bodyStr = jsonEncode(payload);
+      final headers = _buildSecureHeaders('POST', path, bodyStr);
+
+      if (isOfflineFallback) {
+        headers['X-Invariant-Offline'] = 'true';
+        headers['X-Invariant-Offline-Snapshot'] = payload['offline_snapshot'] ?? '{}';
+      }
+
+      final response = await _client.post(
+        Uri.parse('$baseUrl$path'), 
         headers: headers,
-        body: jsonEncode(payload),
+        body: bodyStr,
       ).timeout(kNetworkTimeout);
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
+      } else if (response.statusCode == 429) {
+        throw Exception("Rate Limit Exceeded");
       }
       return null;
     } catch (_) {
@@ -57,12 +105,16 @@ class ApiClient {
     }
   }
 
-  /// Utility: Converts Hex String to List<int> (Byte Array)
-  /// Crucial for interoperability with Rust's Vec<u8> serde deserialization.
-  List<int> hexToBytes(String hex) {
+  String _generateNonce() {
+    final random = Random.secure();
+    final values = List<int>.generate(16, (i) => random.nextInt(256));
+    return values.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  List<int> hexToBytes(String hexStr) {
     List<int> bytes = [];
-    for (int i = 0; i < hex.length; i += 2) {
-      bytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    for (int i = 0; i < hexStr.length; i += 2) {
+      bytes.add(int.parse(hexStr.substring(i, i + 2), radix: 16));
     }
     return bytes;
   }

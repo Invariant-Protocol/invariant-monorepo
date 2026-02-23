@@ -39,8 +39,6 @@ enum SimulationMode {
   forceDeny,
 }
 
-/// Handles the business logic of verifying a device, 
-/// swapping between Real Network calls and Simulation stubs.
 class VerificationService {
   SimulationMode mode = SimulationMode.realNetwork;
 
@@ -53,7 +51,6 @@ class VerificationService {
   }
 
   Future<InvariantResult> _getSimulatedResult(SimulationMode mode) async {
-    // Fake network delay/jitter
     await Future.delayed(Duration(milliseconds: 300 + Random().nextInt(400)));
 
     switch (mode) {
@@ -95,8 +92,6 @@ class VerificationService {
   }
 }
 
-/// Manages logs and metrics to keep the UI lightweight.
-/// Enforces a hard cap on log history to prevent memory bloat.
 class TelemetryManager {
   final List<String> _logs = [];
   final List<int> _latencies = [];
@@ -110,9 +105,8 @@ class TelemetryManager {
 
   void addLog(String tag, String message) {
     final timestamp = DateTime.now().toIso8601String().substring(11, 19);
-    _logs.insert(0, "[$timestamp] $tag: $message"); // Add to top
+    _logs.insert(0, "[$timestamp] $tag: $message"); 
     
-    // Prune old logs
     if (_logs.length > _maxLogs) {
       _logs.removeRange(_maxLogs, _logs.length);
     }
@@ -154,10 +148,17 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
     )..repeat(reverse: true);
 
     _telemetry.addLog("SYSTEM", "Initializing Invariant SDK...");
+    
+    // 🛡️ FIXED: Passed mock credentials to satisfy the new API signature.
+    // The ApiClient has a try-catch block to ignore invalid mock certs.
     Invariant.initialize(
       apiKey: "pilot_v1_evaluation",
+      hmacSecret: "mock_hmac_secret",
+      clientCertPem: "mock_cert",
+      clientPrivateKeyPem: "mock_key",
       mode: InvariantMode.shadow,
     );
+    
     _telemetry.addLog("SDK", "Ready. Mode: SHADOW.");
   }
 
@@ -174,7 +175,6 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
       _lastResult = null;
     });
 
-    // We don't clear logs anymore, we keep history.
     if (_verifier.mode == SimulationMode.realNetwork) {
        _telemetry.addLog("NET", "Requesting Nonce...");
     } else {
@@ -249,7 +249,6 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header & Controls
               HeaderControlPanel(
                 currentMode: _verifier.mode,
                 statusColor: color,
@@ -259,7 +258,6 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
               
               const SizedBox(height: 40),
 
-              // Status Circle & Text
               Center(
                 child: StatusDisplay(
                   isLoading: _isLoading,
@@ -272,7 +270,6 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
 
               const SizedBox(height: 40),
 
-              // Telemetry Stats
               TelemetryHud(
                 riskScore: _lastResult?.score ?? 0.0,
                 avgLatency: _telemetry.avgLatency,
@@ -281,12 +278,10 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
 
               const Spacer(),
 
-              // Rolling Logs
               LogConsole(logs: _telemetry.logs),
 
               const SizedBox(height: 16),
 
-              // Action Button
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -570,7 +565,7 @@ class ManifestSheet extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       height: MediaQuery.of(context).size.height * 0.5,
-      child: SingleChildScrollView( // 🚀 Added Scroll for long chains
+      child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_clients SET last_used = NOW() WHERE client_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "336bc2b1d7bb9eea338ee204ce48382738a4a8a44395703893d5b24dcff1cd9e"
+}

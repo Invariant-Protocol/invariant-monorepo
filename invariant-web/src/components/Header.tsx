@@ -19,25 +19,25 @@ export function Header() {
         {/* NAV */}
         <div className="hidden md:flex items-center space-x-10">
           <NavLink href="/impact" current={pathname}>Mission</NavLink>
-          <NavLink href="/pilot" current={pathname}>Pilot</NavLink>
+          <NavLink href="/docs" current={pathname}>SDK Docs</NavLink>
           <NavLink href="/about" current={pathname}>Team</NavLink>
           
           {/* SEPARATOR */}
           <div className="h-4 w-px bg-white/10" />
           
-          {/* TECH LINK */}
-          <Link 
-            href="/docs"
-            className="text-sm font-mono text-white/50 hover:text-[#00FFC2] transition-colors tracking-wide"
-          >
-            DEVELOPERS
-          </Link>
-
           <Link 
             href="/pilot"
+            className="text-sm font-mono text-white/40 hover:text-white transition-colors tracking-wide"
+          >
+            PILOT (CLOSED)
+          </Link>
+
+          {/* B2B ADMIN CTA */}
+          <Link 
+            href="/dashboard"
             className="bg-white text-black px-5 py-2.5 rounded-sm text-sm font-bold hover:bg-[#00FFC2] transition-colors"
           >
-            Get App
+            Partner Dashboard
           </Link>
         </div>
       </div>
@@ -51,7 +51,7 @@ function NavLink({ href, current, children }: any) {
     <Link 
       href={href}
       className={`text-sm font-medium transition-colors ${
-        isActive ? "text-white" : "text-white/60 hover:text-white"
+        isActive ? "text-[#00FFC2]" : "text-white/60 hover:text-white"
       }`}
     >
       {children}

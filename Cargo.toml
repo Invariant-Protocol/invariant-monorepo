@@ -39,6 +39,10 @@ rand_chacha = "0.3"
 hmac = "0.12"
 ring = { version = "0.17", features = ["std"] }
 
+# 🛡️ NEW: Certificate Generation Dependencies
+rcgen = { version = "0.12", features = ["pem", "x509-parser"] }
+pem = "3.0"
+
 # --- Server & Database ---
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
 reqwest = { version = "0.11", features = ["json"] }
@@ -50,10 +54,10 @@ tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["fmt", "env-filter", "json"] }
 base64 = "0.21"
 redis = { version = "1.0.2", features = ["tokio-comp"] }
-once_cell = "1.18" # For Rate Limiter state
-gcp_auth = "0.10" # Handles the OAuth2 complexity automatically
+once_cell = "1.18"
+gcp_auth = "0.10"
 
-# 🛡️ mTLS Dependencies (Updated to match Axum 0.7)
+# 🛡️ mTLS Dependencies 
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 rustls = "0.23"
 rustls-pemfile = "2.1"

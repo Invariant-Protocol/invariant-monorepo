@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO api_client_offline_audit (api_key, endpoint, snapshot_payload) VALUES ($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf6d0ddce8bd35854e2cbde4094b96dc07a47d2677cf412590981764be22e55e"
+}

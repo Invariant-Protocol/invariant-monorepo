@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT client_id, api_key, status, shadow_mode, created_at FROM api_clients ORDER BY created_at DESC LIMIT 100",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "api_key",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "shadow_mode",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "6541fab8c2698f75a72f692197250bc5fe0d2b43c63e1d57cbc4c36d22f10f1d"
+}

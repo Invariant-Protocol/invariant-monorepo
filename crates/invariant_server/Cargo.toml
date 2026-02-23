@@ -1,3 +1,4 @@
+# crates/invariant_server/Cargo.toml
 [package]
 name = "invariant_server"
 version.workspace = true
@@ -39,3 +40,7 @@ ring = { workspace = true }
 axum-server = { workspace = true }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
+
+# 🛡️ NEW
+rcgen = { workspace = true }
+pem = { workspace = true }

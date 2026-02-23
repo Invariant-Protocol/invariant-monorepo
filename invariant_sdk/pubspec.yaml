@@ -14,6 +14,8 @@ dependencies:
     sdk: flutter
   http: ^1.2.0 
   plugin_platform_interface: ^2.0.2
+  crypto: ^3.0.3               # <-- ADDED for HMAC-SHA256
+  shared_preferences: ^2.2.2   # <-- ADDED for Offline Policy Cache
 
 dev_dependencies:
   flutter_test:

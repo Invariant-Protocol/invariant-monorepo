@@ -32,7 +32,6 @@ use crate::state::AppState;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     
-    // 1. Production JSON Logging
     let log_format = tracing_subscriber::fmt::format()
         .with_level(true)
         .with_target(true)
@@ -47,12 +46,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(tracing_subscriber::fmt::layer().event_format(log_format))
         .init();
 
-    // 2. Initialize FCM
     if let Err(e) = services::push::initialize().await {
         tracing::error!("⚠️ Failed to initialize FCM: {}. Wake-up calls disabled.", e);
     }
 
-    // 3. Database Connection Pool
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
         .max_connections(75) 
@@ -62,12 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     sqlx::migrate!("./migrations").run(&pool).await?;
 
-    // 4. Redis Connection
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
     let redis_client = redis::Client::open(redis_url)?;
     let nonce_manager = RedisNonceManager { client: redis_client.clone() };
 
-    // 5. App Configuration
     let network_str = std::env::var("INVARIANT_NETWORK").unwrap_or_else(|_| "testnet".into());
     let network = match network_str.to_lowercase().as_str() {
         "mainnet" => Network::Mainnet,
@@ -80,6 +75,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse::<u16>()
         .expect("Invalid GENESIS_VERSION");
 
+    let admin_secret = std::env::var("ADMIN_API_SECRET")
+        .expect("CRITICAL: ADMIN_API_SECRET must be set in production");
+
     tracing::info!(
         event = "startup",
         network = ?network,
@@ -87,7 +85,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "🚀 Booting Invariant Node"
     );
 
-    // 6. Initialize Engine & State
     let storage = PostgresStorage::new(pool.clone());
     let engine_config = EngineConfig { network, genesis_version };
     
@@ -97,9 +94,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         engine,
         redis: redis_client,
         pool: pool.clone(),
+        admin_secret,
     });
 
-    // 7. Background Worker (Reaper + Wake Up Call)
     let worker_storage = PostgresStorage::new(pool.clone());
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(900)); 
@@ -127,12 +124,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // 8. Launch API Server
     let app = handlers::app_router(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
     
-    tracing::info!(event = "server_listening", address = %addr, "Invariant mTLS Server actively listening");
+    tracing::info!(event = "server_listening", address = %addr, "Invariant Native mTLS Server actively listening");
     
+    // NATIVE TLS ENFORCEMENT: The certificates configured here act as the physical bouncer.
     let config = tls::build_tls_config(
         "certs/server.crt",
         "certs/server.key",
@@ -140,7 +137,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(config));
 
-    // Uses the updated axum-server v0.8 to bind safely to Axum v0.7
     axum_server::bind_rustls(addr, tls_config)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;

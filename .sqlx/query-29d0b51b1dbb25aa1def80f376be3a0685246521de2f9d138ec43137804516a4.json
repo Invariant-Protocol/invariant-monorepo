@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_clients SET status = 'revoked', revoked_at = NOW() WHERE api_key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "29d0b51b1dbb25aa1def80f376be3a0685246521de2f9d138ec43137804516a4"
+}

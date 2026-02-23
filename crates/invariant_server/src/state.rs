@@ -19,4 +19,5 @@ pub struct AppState {
     pub engine: InvariantEngine<PostgresStorage, RedisNonceManager>,
     pub redis: RedisClient,
     pub pool: PgPool, 
+    pub admin_secret: String, // 🛡️ Loaded once at startup for thread-safe access
 }
