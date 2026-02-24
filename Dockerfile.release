@@ -1,6 +1,6 @@
 # 1. Build Stage
 # 🚀 FIX: Pin to 'bookworm' to ensure glibc 2.36 parity across stages
-FROM lukemathwalker/cargo-chef:latest-rust-1-bookworm AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.91-bookworm AS chef
 WORKDIR /app
 
 FROM chef AS planner
