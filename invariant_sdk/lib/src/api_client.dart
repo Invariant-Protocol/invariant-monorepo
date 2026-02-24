@@ -2,8 +2,10 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:developer' as developer; // 🛡️ Import for silent logging
 import 'package:http/io_client.dart';
 import 'package:crypto/crypto.dart';
+import 'internal_certificates.dart'; 
 
 class ApiClient {
   final String apiKey;
@@ -16,19 +18,23 @@ class ApiClient {
   ApiClient({
     required this.apiKey,
     required this.hmacSecret,
-    required String clientCertPem,
-    required String clientPrivateKeyPem,
     String? baseUrl,
   }) : baseUrl = baseUrl ?? "https://16.171.151.222:8443" {
     
     final context = SecurityContext(withTrustedRoots: true);
     
     try {
-      context.useCertificateChainBytes(utf8.encode(clientCertPem));
-      context.usePrivateKeyBytes(utf8.encode(clientPrivateKeyPem));
-    } catch (e) {
-      // Failsafe: Allows the SDK example app to boot with mock string values 
-      // without throwing a native TLS parsing exception.
+      context.useCertificateChainBytes(utf8.encode(SdkIdentity.clientCrt));
+      context.usePrivateKeyBytes(utf8.encode(SdkIdentity.clientKey));
+    } catch (e, stackTrace) {
+      // 🛡️ Fixed: Replaced 'print' with developer.log for production safety.
+      // This is visible in DevTools but silent in the user's terminal.
+      developer.log(
+        "FAILED_TO_LOAD_SDK_IDENTITY",
+        name: "tech.invariant.sdk",
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
     
     final httpClient = HttpClient(context: context)

@@ -14,19 +14,16 @@ class Invariant {
   
   static const MethodChannel _channel = MethodChannel('com.invariant.protocol/keystore');
 
+  // 🛡️ The Partner ONLY provides their authorization credentials
   static void initialize({
     required String apiKey,
     required String hmacSecret,
-    required String clientCertPem,
-    required String clientPrivateKeyPem,
     InvariantMode mode = InvariantMode.shadow,
     String? baseUrl,
   }) {
     _client = ApiClient(
       apiKey: apiKey,
       hmacSecret: hmacSecret,
-      clientCertPem: clientCertPem,
-      clientPrivateKeyPem: clientPrivateKeyPem,
       baseUrl: baseUrl,
     );
     

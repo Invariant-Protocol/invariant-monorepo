@@ -149,13 +149,11 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
 
     _telemetry.addLog("SYSTEM", "Initializing Invariant SDK...");
     
-    // 🛡️ FIXED: Passed mock credentials to satisfy the new API signature.
-    // The ApiClient has a try-catch block to ignore invalid mock certs.
+    // 🛡️ Clean Partner Integration: Only the authorization identity is provided.
+    // The mTLS certificate is securely loaded internally.
     Invariant.initialize(
-      apiKey: "pilot_v1_evaluation",
-      hmacSecret: "mock_hmac_secret",
-      clientCertPem: "mock_cert",
-      clientPrivateKeyPem: "mock_key",
+      apiKey: "pk_live_pilot_evaluation",
+      hmacSecret: "mock_hmac_secret_for_ui_testing",
       mode: InvariantMode.shadow,
     );
     
