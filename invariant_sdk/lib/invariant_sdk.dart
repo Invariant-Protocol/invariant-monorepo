@@ -14,17 +14,19 @@ class Invariant {
   
   static const MethodChannel _channel = MethodChannel('com.invariant.protocol/keystore');
 
-  /// 🛡️ Initialize the SDK. This will automatically provision mTLS certificates
-  /// with the Invariant Cloud if they do not already exist on the device.
-  static Future<void> initialize({
+  static void initialize({
     required String apiKey,
     required String hmacSecret,
+    required String clientCertPem,
+    required String clientPrivateKeyPem,
     InvariantMode mode = InvariantMode.shadow,
     String? baseUrl,
-  }) async {
-    _client = await ApiClient.initialize(
+  }) {
+    _client = ApiClient(
       apiKey: apiKey,
       hmacSecret: hmacSecret,
+      clientCertPem: clientCertPem,
+      clientPrivateKeyPem: clientPrivateKeyPem,
       baseUrl: baseUrl,
     );
     
@@ -33,7 +35,7 @@ class Invariant {
 
   static Future<InvariantResult> verifyDevice() async {
     if (_client == null || _verificationService == null) {
-      return InvariantResult.deny("SDK not initialized. Call await Invariant.initialize() first.");
+      return InvariantResult.deny("SDK not initialized. Call Invariant.initialize() first.");
     }
 
     final nonce = await _client!.getChallenge();
