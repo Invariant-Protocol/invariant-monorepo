@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO api_client_audit (timestamp, actor_id, target_client_id, action, reason, details)\n            VALUES (NOW(), $1, $2, $3, $4, $5)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cdd2092607967b35786992c7954007cb7e421f95b3a4a19a31d90dc137c13509"
+}

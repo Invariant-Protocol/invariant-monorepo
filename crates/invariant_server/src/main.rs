@@ -15,6 +15,8 @@ mod handlers;
 mod error_response; 
 mod api_docs;      
 mod services { pub mod push; }
+mod kms;            // 🛡️ NEW
+mod rate_limiter;   // 🛡️ NEW
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -27,6 +29,11 @@ use invariant_shared::Network;
 use crate::db::PostgresStorage;
 use crate::impls::RedisNonceManager; 
 use crate::state::AppState;
+use crate::rate_limiter::RateLimiter;
+
+use aws_config;
+use aws_sdk_kms::Client as KmsClient;
+use moka::future::Cache;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -85,16 +92,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "🚀 Booting Invariant Node"
     );
 
+    // 🛡️ KMS & Envelope Encryption Initialization (Fix: BehaviorVersion used)
+    let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let kms_client = KmsClient::new(&aws_config);
+    
+    let cache_ttl = std::env::var("KEY_CACHE_TTL_SECS")
+        .unwrap_or_else(|_| "300".to_string())
+        .parse::<u64>()
+        .unwrap_or(300);
+
+    let key_cache: Cache<String, Vec<u8>> = Cache::builder()
+        .time_to_live(Duration::from_secs(cache_ttl))
+        .max_capacity(10_000)
+        .build();
+
     let storage = PostgresStorage::new(pool.clone());
     let engine_config = EngineConfig { network, genesis_version };
-    
     let engine = InvariantEngine::new(storage, nonce_manager, engine_config);
-    
+
+    // 🛡️ Token-Bucket Rate Limiter
+    let rate_limiter = RateLimiter::new(redis_client.clone());
+
     let state = Arc::new(AppState { 
         engine,
         redis: redis_client,
         pool: pool.clone(),
         admin_secret,
+        kms_client,
+        key_cache,
+        rate_limiter
     });
 
     let worker_storage = PostgresStorage::new(pool.clone());

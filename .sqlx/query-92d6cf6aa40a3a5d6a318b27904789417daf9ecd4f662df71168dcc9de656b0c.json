@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_client_secrets SET active = false WHERE api_client_id = $1 AND active = true",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "92d6cf6aa40a3a5d6a318b27904789417daf9ecd4f662df71168dcc9de656b0c"
+}

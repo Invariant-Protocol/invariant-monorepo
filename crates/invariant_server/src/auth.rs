@@ -18,6 +18,9 @@ use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 use redis::AsyncCommands;
 use crate::state::SharedState;
+use crate::kms::KmsHelper;
+use tracing::{warn, error, debug};
+use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -33,7 +36,7 @@ pub struct OfflinePolicy {
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct ValidatedClient {
-    pub client_id: uuid::Uuid,
+    pub client_id: Uuid,
     pub api_key: String,
     pub is_offline_fallback: bool,
     pub shadow_mode: bool,
@@ -53,7 +56,7 @@ pub async fn admin_auth_middleware(
     if auth_header == format!("Bearer {}", state.admin_secret) {
         Ok(next.run(req).await)
     } else {
-        tracing::warn!("🚨 Unauthorized access attempt to /admin router");
+        warn!("🚨 Unauthorized access attempt to /admin router");
         Err(StatusCode::UNAUTHORIZED)
     }
 }
@@ -78,13 +81,14 @@ pub async fn bootstrap_hmac_middleware(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Lookup Client and Secret without enforcing Certificate Fingerprint
     let record = sqlx::query!(
         r#"
         SELECT 
             ac.client_id, 
             ac.shadow_mode, 
-            acs.secret_wrapped
+            acs.secret_wrapped,
+            ac.requests_per_second,
+            ac.burst_capacity
         FROM api_clients ac
         JOIN api_client_secrets acs ON ac.client_id = acs.api_client_id
         WHERE ac.api_key = $1 
@@ -98,6 +102,15 @@ pub async fn bootstrap_hmac_middleware(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .ok_or(StatusCode::UNAUTHORIZED)?;
 
+    // Rate Limiting Enforcement
+    let rps = record.requests_per_second.unwrap_or(10) as f64;
+    let burst = record.burst_capacity.unwrap_or(20) as u64;
+    if !state.rate_limiter.acquire(api_key, rps, burst).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        let storage = crate::db::PostgresStorage::new(state.pool.clone());
+        storage.insert_client_audit(None, Some(record.client_id), "throttled", Some("rate limit exceeded (bootstrap)"), None).await;
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+
     // Anti-Replay Check
     let mut conn = state.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let nonce_key = format!("invariant:nonce:{}:{}", api_key, nonce);
@@ -106,6 +119,8 @@ pub async fn bootstrap_hmac_middleware(
         .query_async(&mut conn).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if !is_new {
+        let storage = crate::db::PostgresStorage::new(state.pool.clone());
+        storage.insert_client_audit(None, Some(record.client_id), "replay_attempt", Some("nonce replay (bootstrap)"), None).await;
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -122,15 +137,24 @@ pub async fn bootstrap_hmac_middleware(
         parts.method.as_str(), parts.uri.path(), parts.uri.query().unwrap_or(""), host, body_hash, timestamp_str, nonce
     );
 
-    let mut mac = HmacSha256::new_from_slice(&record.secret_wrapped).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // KMS Envelope Decryption via Moka Cache
+    let kms_helper = KmsHelper::new(state.kms_client.clone(), state.key_cache.clone());
+    let ciphertext_blob: Vec<u8> = record.secret_wrapped;
+    let key_bytes = kms_helper.decrypt_cached(&ciphertext_blob).await.map_err(|e| {
+        error!("KMS decrypt error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut mac = HmacSha256::new_from_slice(&key_bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     mac.update(canonical_string.as_bytes());
 
     if mac.verify_slice(&decoded_sig).is_err() {
+        let storage = crate::db::PostgresStorage::new(state.pool.clone());
+        storage.insert_client_audit(None, Some(record.client_id), "hmac_failure", Some("signature mismatch (bootstrap)"), None).await;
         return Err(StatusCode::UNAUTHORIZED); 
     }
 
     let mut req = Request::from_parts(parts, axum::body::Body::from(bytes));
-    
     req.extensions_mut().insert(ValidatedClient {
         client_id: record.client_id,
         api_key: api_key.to_string(),
@@ -171,11 +195,11 @@ pub async fn verify_hmac_middleware(
     };
 
     let peer_fingerprint = peer_fingerprint.ok_or_else(|| {
-        tracing::error!("Missing mTLS fingerprint for API Key: {}. (SDK must explicitly send X-Client-Cert-Fingerprint when bypassing ALB)", api_key);
+        error!("Missing mTLS fingerprint for API Key: {}. (SDK must explicitly send X-Client-Cert-Fingerprint when bypassing ALB)", api_key);
         StatusCode::UNAUTHORIZED
     })?;
 
-    tracing::debug!(api_key = %api_key, source = %routing_source, "Resolving mTLS Identity");
+    debug!(api_key = %api_key, source = %routing_source, "Resolving mTLS Identity");
 
     let record = sqlx::query!(
         r#"
@@ -183,7 +207,9 @@ pub async fn verify_hmac_middleware(
             ac.client_id, 
             ac.shadow_mode, 
             ac.offline_policy,
-            ac.rate_limit_per_hour,
+            ac.requests_per_second,
+            ac.burst_capacity,
+            ac.monthly_quota,
             acs.secret_wrapped
         FROM api_clients ac
         JOIN api_client_certs acc ON ac.client_id = acc.api_client_id
@@ -199,8 +225,20 @@ pub async fn verify_hmac_middleware(
     )
     .fetch_optional(&state.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|e| {
+        error!("DB error resolving client for api_key {}: {}", api_key, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
     .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // Rate Limiting Enforcement
+    let rps = record.requests_per_second.unwrap_or(10) as f64;
+    let burst = record.burst_capacity.unwrap_or(20) as u64;
+    if !state.rate_limiter.acquire(api_key, rps, burst).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        let storage = crate::db::PostgresStorage::new(state.pool.clone());
+        storage.insert_client_audit(None, Some(record.client_id), "throttled", Some("rate limit exceeded (data plane)"), None).await;
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
 
     if is_offline_req {
         let policy: OfflinePolicy = match record.offline_policy {
@@ -225,6 +263,8 @@ pub async fn verify_hmac_middleware(
         }
 
         if current_usage > policy.rate_per_minute {
+            let storage = crate::db::PostgresStorage::new(state.pool.clone());
+            storage.insert_client_audit(None, Some(record.client_id), "offline_over_rate", Some("offline rate exceeded"), None).await;
             return Err(StatusCode::TOO_MANY_REQUESTS);
         }
 
@@ -236,14 +276,12 @@ pub async fn verify_hmac_middleware(
         let pool = state.pool.clone();
 
         tokio::spawn(async move {
-            let _ = sqlx::query!(
-                "INSERT INTO api_client_offline_audit (api_key, endpoint, snapshot_payload) VALUES ($1, $2, $3)",
-                api_key_clone, path_clone, parsed_snapshot
-            )
-            .execute(&pool).await;
+            let _ = sqlx::query!("INSERT INTO api_client_offline_audit (api_key, endpoint, snapshot_payload) VALUES ($1, $2, $3)", api_key_clone, path_clone, parsed_snapshot)
+                .execute(&pool).await;
         });
     }
 
+    // Anti-Replay Check
     let mut conn = state.redis.get_multiplexed_async_connection().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let nonce_key = format!("invariant:nonce:{}:{}", api_key, nonce);
     
@@ -251,6 +289,8 @@ pub async fn verify_hmac_middleware(
         .query_async(&mut conn).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if !is_new {
+        let storage = crate::db::PostgresStorage::new(state.pool.clone());
+        storage.insert_client_audit(None, Some(record.client_id), "replay_attempt", Some("nonce replay (data plane)"), None).await;
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -267,11 +307,21 @@ pub async fn verify_hmac_middleware(
         parts.method.as_str(), parts.uri.path(), parts.uri.query().unwrap_or(""), host, body_hash, timestamp_str, nonce
     );
 
-    let mut mac = HmacSha256::new_from_slice(&record.secret_wrapped).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // KMS Envelope Decryption via Moka Cache
+    let kms_helper = KmsHelper::new(state.kms_client.clone(), state.key_cache.clone());
+    let ciphertext_blob: Vec<u8> = record.secret_wrapped;
+    let key_bytes = kms_helper.decrypt_cached(&ciphertext_blob).await.map_err(|e| {
+        error!("KMS decrypt error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut mac = HmacSha256::new_from_slice(&key_bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     mac.update(canonical_string.as_bytes());
 
     let is_shadow = record.shadow_mode.unwrap_or(false);
     if mac.verify_slice(&decoded_sig).is_err() {
+        let storage = crate::db::PostgresStorage::new(state.pool.clone());
+        storage.insert_client_audit(None, Some(record.client_id), "hmac_failure", Some("signature mismatch (data plane)"), None).await;
         if !is_shadow { return Err(StatusCode::UNAUTHORIZED); }
     }
 
@@ -283,7 +333,6 @@ pub async fn verify_hmac_middleware(
     });
 
     let mut req = Request::from_parts(parts, axum::body::Body::from(bytes));
-    
     req.extensions_mut().insert(ValidatedClient {
         client_id: record.client_id,
         api_key: api_key.to_string(),

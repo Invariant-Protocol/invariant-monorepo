@@ -28,6 +28,7 @@ pub mod heartbeat;
 pub mod identity;
 pub mod admin; 
 pub mod provisioning; 
+pub mod secrets; // 🛡️ NEW: Secret Rotation Handler
 use crate::auth;
 
 async fn check_identity_handler(
@@ -85,6 +86,7 @@ pub fn app_router(state: SharedState) -> Router {
         .route("/keys/generate", post(admin::generate_client_key_handler))
         .route("/keys/revoke", post(admin::revoke_client_key_handler))
         .route("/keys/list", get(admin::list_client_keys_handler))
+        .route("/keys/:client_id/rotate-secret", post(secrets::rotate_hmac_secret_handler)) // 🛡️ NEW
         .layer(middleware::from_fn(auth::admin_auth_middleware));
 
     // BOOTSTRAP PLANE: Requires API Key + HMAC (No mTLS required)

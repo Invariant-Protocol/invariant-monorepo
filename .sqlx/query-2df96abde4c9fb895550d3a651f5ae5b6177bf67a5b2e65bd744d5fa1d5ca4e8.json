@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT \n            ac.client_id, \n            ac.shadow_mode, \n            ac.offline_policy,\n            ac.requests_per_second,\n            ac.burst_capacity,\n            ac.monthly_quota,\n            acs.secret_wrapped\n        FROM api_clients ac\n        JOIN api_client_certs acc ON ac.client_id = acc.api_client_id\n        JOIN api_client_secrets acs ON ac.client_id = acs.api_client_id\n        WHERE ac.api_key = $1 \n          AND ac.status = 'active'\n          AND acc.fingerprint = $2\n          AND acc.revoked = false\n          AND acs.active = true\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "client_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "shadow_mode",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "offline_policy",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "requests_per_second",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "burst_capacity",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "monthly_quota",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "secret_wrapped",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "2df96abde4c9fb895550d3a651f5ae5b6177bf67a5b2e65bd744d5fa1d5ca4e8"
+}

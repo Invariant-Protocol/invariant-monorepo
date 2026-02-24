@@ -12,6 +12,7 @@ use uuid::Uuid;
 use invariant_engine::{IdentityStorage, EngineError};
 use invariant_shared::{Identity, Heartbeat, IdentityStatus};
 use sha2::{Sha256, Digest};
+use tracing::error;
 
 pub struct PostgresStorage {
     pub pool: PgPool,
@@ -19,6 +20,32 @@ pub struct PostgresStorage {
 
 impl PostgresStorage {
     pub fn new(pool: PgPool) -> Self { Self { pool } }
+
+    /// 🛡️ NEW: Insert an audit event into api_client_audit table. 
+    /// This is used by auth middleware and admin handlers for compliance logging.
+    pub async fn insert_client_audit(
+        &self, 
+        actor_id: Option<Uuid>, 
+        target_client_id: Option<Uuid>, 
+        action: &str, 
+        reason: Option<&str>, 
+        details: Option<serde_json::Value>
+    ) {
+        let _ = sqlx::query!(
+            r#"
+            INSERT INTO api_client_audit (timestamp, actor_id, target_client_id, action, reason, details)
+            VALUES (NOW(), $1, $2, $3, $4, $5)
+            "#,
+            actor_id,
+            target_client_id,
+            action,
+            reason,
+            details
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| error!("Failed to insert client audit: {}", e));
+    }
 }
 
 #[async_trait]
