@@ -1,4 +1,10 @@
 // crates/invariant_server/src/handlers/mod.rs
+/*
+ * Copyright (c) 2026 Invariant Protocol.
+ *
+ * This source code is licensed under the Business Source License (BSL 1.1) 
+ * found in the LICENSE.md file in the root directory of this source tree.
+ */
 
 use axum::{Router, routing::{get, post}, extract::Path, http::{StatusCode, HeaderValue, header}, Extension, Json, middleware};
 use crate::state::SharedState;
@@ -14,7 +20,6 @@ use tower_http::{
     set_header::SetResponseHeaderLayer,
 };
 
-use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 use crate::api_docs::ApiDoc;
 
@@ -66,6 +71,7 @@ pub fn app_router(state: SharedState) -> Router {
             HeaderValue::from_static("DENY"),
         ));
 
+    // DATA PLANE: Requires mTLS AND HMAC
     let sensitive_routes = Router::new()
         .route("/genesis", post(genesis::genesis_handler))
         .route("/verify", post(genesis::verify_stateless_handler)) 
@@ -74,18 +80,20 @@ pub fn app_router(state: SharedState) -> Router {
         .route("/identity/:id/manifest", get(identity::get_manifest_handler))
         .layer(middleware::from_fn(auth::verify_hmac_middleware));
 
-    // 🛡️ CRITICAL FIX: The Admin routes are now explicitly guarded by the master password
+    // CONTROL PLANE: Requires Master Secret
     let admin_routes = Router::new()
         .route("/keys/generate", post(admin::generate_client_key_handler))
         .route("/keys/revoke", post(admin::revoke_client_key_handler))
         .route("/keys/list", get(admin::list_client_keys_handler))
         .layer(middleware::from_fn(auth::admin_auth_middleware));
 
+    // BOOTSTRAP PLANE: Requires API Key + HMAC (No mTLS required)
     let sdk_routes = Router::new()
-        .route("/provision", post(provisioning::provision_sdk_handler));
+        .route("/provision", post(provisioning::provision_sdk_handler))
+        .layer(middleware::from_fn(auth::bootstrap_hmac_middleware));
 
     Router::new()
-        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", <ApiDoc as utoipa::OpenApi>::openapi()))
         
         .route("/health", get(|| async { "Invariant Node Online" }))
         .route("/heartbeat/challenge", get(heartbeat::get_heartbeat_challenge_handler))
