@@ -136,33 +136,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // 🛡️ DUAL-PORT ROUTING
-    let main_app = handlers::app_router(state.clone());
-    let prov_app = handlers::provisioning_router(state.clone());
-
-    let addr_main = SocketAddr::from(([0, 0, 0, 0], 8443));
-    let addr_prov = SocketAddr::from(([0, 0, 0, 0], 8444));
+    let app = handlers::app_router(state.clone());
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
     
-    let main_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(
-        tls::build_mtls_config("certs/server.crt", "certs/server.key", "certs/ca.crt")
-    ));
-    
-    let prov_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(
-        tls::build_standard_tls_config("certs/server.crt", "certs/server.key")
+    // 🛡️ Load strict mTLS config
+    let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(
+        tls::build_tls_config("certs/server.crt", "certs/server.key", "certs/ca.crt")
     ));
 
-    tracing::info!(event = "server_listening", "🚀 Invariant Active. Port 8443 (mTLS) | Port 8444 (Enrollment)");
+    tracing::info!(event = "server_listening", "🚀 Invariant Active. Port 8443 (Strict mTLS + HMAC)");
 
-    // Spawn Provisioning Server
-    tokio::spawn(async move {
-        axum_server::bind_rustls(addr_prov, prov_tls_config)
-            .serve(prov_app.into_make_service_with_connect_info::<SocketAddr>())
-            .await.unwrap();
-    });
-
-    // Spawn Main Server
-    axum_server::bind_rustls(addr_main, main_tls_config)
-        .serve(main_app.into_make_service_with_connect_info::<SocketAddr>())
+    axum_server::bind_rustls(addr, tls_config)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
     Ok(())

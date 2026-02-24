@@ -10,7 +10,7 @@ use axum::{Router, routing::{get, post}, extract::Path, http::{StatusCode, Heade
 use crate::state::SharedState;
 use uuid::Uuid;
 use invariant_engine::IdentityStorage;
-use std::time::Duration; // 🛡️ Changed from chrono::Duration
+use std::time::Duration; 
 
 use tower::ServiceBuilder;
 use tower_http::{
@@ -27,7 +27,6 @@ pub mod genesis;
 pub mod heartbeat;
 pub mod identity;
 pub mod admin; 
-pub mod provisioning; 
 pub mod secrets;
 use crate::auth;
 
@@ -75,6 +74,7 @@ fn build_security_headers() -> ServiceBuilder<tower::layer::util::Stack<SetRespo
 }
 
 pub fn app_router(state: SharedState) -> Router {
+    // 🛡️ DATA PLANE: Requires mTLS (SDK Identity) AND HMAC (Partner Identity)
     let sensitive_routes = Router::new()
         .route("/genesis", post(genesis::genesis_handler))
         .route("/verify", post(genesis::verify_stateless_handler)) 
@@ -83,6 +83,7 @@ pub fn app_router(state: SharedState) -> Router {
         .route("/identity/:id/manifest", get(identity::get_manifest_handler))
         .layer(middleware::from_fn(auth::verify_hmac_middleware));
 
+    // 🛡️ CONTROL PLANE: Requires Master Secret
     let admin_routes = Router::new()
         .route("/keys/generate", post(admin::generate_client_key_handler))
         .route("/keys/revoke", post(admin::revoke_client_key_handler))
@@ -104,22 +105,7 @@ pub fn app_router(state: SharedState) -> Router {
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http()) 
-                .layer(TimeoutLayer::new(Duration::from_secs(15))) // std::time::Duration
-                .layer(CompressionLayer::new())
-                .layer(build_security_headers().into_inner())
-                .layer(Extension(state))
-        )
-}
-
-/// 🛡️ THE ENROLLMENT ROUTER (Port 8444)
-pub fn provisioning_router(state: SharedState) -> Router {
-    Router::new()
-        .route("/provision/challenge", get(provisioning::get_provision_challenge_handler))
-        .route("/provision", post(provisioning::provision_sdk_handler))
-        .layer(
-            ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http()) 
-                .layer(TimeoutLayer::new(Duration::from_secs(15))) // std::time::Duration
+                .layer(TimeoutLayer::new(Duration::from_secs(15)))
                 .layer(CompressionLayer::new())
                 .layer(build_security_headers().into_inner())
                 .layer(Extension(state))

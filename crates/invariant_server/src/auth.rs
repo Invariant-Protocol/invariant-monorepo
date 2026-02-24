@@ -61,8 +61,7 @@ pub async fn admin_auth_middleware(
     }
 }
 
-// 🛡️ DATA PLANE: Requires mTLS Fingerprint, HMAC, API Key, Nonce, Timestamp.
-// This runs exclusively on Port 8443 (The Fortress).
+// 🛡️ DATA PLANE: Requires mTLS Fingerprint (SDK Identity) + HMAC (Partner Identity).
 pub async fn verify_hmac_middleware(
     Extension(state): Extension<SharedState>,
     headers: HeaderMap,
@@ -91,7 +90,7 @@ pub async fn verify_hmac_middleware(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // 3. Extract mTLS Fingerprint (Terminated by Rustls or AWS ALB)
+    // 3. Extract mTLS Fingerprint (Verifies this is the Official SDK)
     let (peer_fingerprint, routing_source) = if let Some(v) = headers.get("x-amzn-mtls-clientcert-thumbprint") {
         (v.to_str().ok().map(|s| s.to_string()), "AWS_ALB")
     } else if let Some(v) = headers.get("X-Client-Cert-Fingerprint") {
@@ -107,7 +106,7 @@ pub async fn verify_hmac_middleware(
 
     debug!(api_key = %api_key, source = %routing_source, "Resolving mTLS Identity");
 
-    // 4. Resolve Client & Secrets via DB Join
+    // 4. Resolve Partner Client & Secrets via DB Join
     let record = sqlx::query!(
         r#"
         SELECT 
@@ -147,7 +146,7 @@ pub async fn verify_hmac_middleware(
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
-    // 6. Offline Policy Processing (If applicable)
+    // 6. Offline Policy Processing
     if is_offline_req {
         let policy: OfflinePolicy = match record.offline_policy {
             Some(json) => serde_json::from_value(json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
@@ -225,7 +224,7 @@ pub async fn verify_hmac_middleware(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // 10. Verify HMAC Signature
+    // 10. Verify Partner HMAC Signature
     let mut mac = HmacSha256::new_from_slice(&key_bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     mac.update(canonical_string.as_bytes());
 
