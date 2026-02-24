@@ -17,7 +17,7 @@ mod api_docs;
 mod services { pub mod push; }
 mod kms;            
 mod rate_limiter;   
-mod circuit_breaker; // 🛡️ NEW
+mod circuit_breaker; 
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -87,35 +87,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_secret = std::env::var("ADMIN_API_SECRET")
         .expect("CRITICAL: ADMIN_API_SECRET must be set in production");
 
-    tracing::info!(
-        event = "startup",
-        network = ?network,
-        version = genesis_version,
-        "🚀 Booting Invariant Node"
-    );
-
-    // 🛡️ KMS & Envelope Encryption Initialization
     let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let kms_client = KmsClient::new(&aws_config);
     
-    let cache_ttl = std::env::var("KEY_CACHE_TTL_SECS")
-        .unwrap_or_else(|_| "300".to_string())
-        .parse::<u64>()
-        .unwrap_or(300);
-
-    let key_cache: Cache<String, Vec<u8>> = Cache::builder()
-        .time_to_live(Duration::from_secs(cache_ttl))
-        .max_capacity(10_000)
-        .build();
+    let cache_ttl = std::env::var("KEY_CACHE_TTL_SECS").unwrap_or_else(|_| "300".to_string()).parse::<u64>().unwrap_or(300);
+    let key_cache: Cache<String, Vec<u8>> = Cache::builder().time_to_live(Duration::from_secs(cache_ttl)).max_capacity(10_000).build();
 
     let storage = PostgresStorage::new(pool.clone());
     let engine_config = EngineConfig { network, genesis_version };
     let engine = InvariantEngine::new(storage, nonce_manager, engine_config);
 
-    // 🛡️ Protection Services
     let rate_limiter = RateLimiter::new(redis_client.clone());
-    
-    // Default Circuit Breaker: Trip after 50 failures in 5 minutes. Cooldown for 15 minutes.
     let circuit_breaker = CircuitBreaker::new(redis_client.clone(), 50, 300, 900);
 
     let state = Arc::new(AppState { 
@@ -134,7 +116,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = tokio::time::interval(Duration::from_secs(900)); 
         loop {
             interval.tick().await;
-            
             match worker_storage.get_late_fcm_tokens(24 * 60).await {
                 Ok(tokens) => {
                     if !tokens.is_empty() {
@@ -149,27 +130,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => tracing::error!("Failed to fetch late tokens: {}", e),
             }
-
             if let Err(e) = worker_storage.run_reaper().await {
                 tracing::error!("Reaper failed: {}", e);
             }
         }
     });
 
-    let app = handlers::app_router(state);
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8443));
-    
-    tracing::info!(event = "server_listening", address = %addr, "Invariant Native mTLS Server actively listening");
-    
-    let config = tls::build_tls_config(
-        "certs/server.crt",
-        "certs/server.key",
-        "certs/ca.crt"
-    );
-    let tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(config));
+    // 🛡️ DUAL-PORT ROUTING
+    let main_app = handlers::app_router(state.clone());
+    let prov_app = handlers::provisioning_router(state.clone());
 
-    axum_server::bind_rustls(addr, tls_config)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+    let addr_main = SocketAddr::from(([0, 0, 0, 0], 8443));
+    let addr_prov = SocketAddr::from(([0, 0, 0, 0], 8444));
+    
+    let main_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(
+        tls::build_mtls_config("certs/server.crt", "certs/server.key", "certs/ca.crt")
+    ));
+    
+    let prov_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(
+        tls::build_standard_tls_config("certs/server.crt", "certs/server.key")
+    ));
+
+    tracing::info!(event = "server_listening", "🚀 Invariant Active. Port 8443 (mTLS) | Port 8444 (Enrollment)");
+
+    // Spawn Provisioning Server
+    tokio::spawn(async move {
+        axum_server::bind_rustls(addr_prov, prov_tls_config)
+            .serve(prov_app.into_make_service_with_connect_info::<SocketAddr>())
+            .await.unwrap();
+    });
+
+    // Spawn Main Server
+    axum_server::bind_rustls(addr_main, main_tls_config)
+        .serve(main_app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
     Ok(())

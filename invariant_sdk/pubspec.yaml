@@ -14,8 +14,10 @@ dependencies:
     sdk: flutter
   http: ^1.2.0 
   plugin_platform_interface: ^2.0.2
-  crypto: ^3.0.3               # <-- ADDED for HMAC-SHA256
-  shared_preferences: ^2.2.2   # <-- ADDED for Offline Policy Cache
+  crypto: ^3.0.3                # HMAC computation
+  shared_preferences: ^2.2.2    # Policy caching
+  flutter_secure_storage: ^9.0.0 # 🛡️ Encrypted on-device storage for mTLS keys
+  basic_utils: ^5.6.1           # 🛡️ CSR and KeyPair generation in Dart
 
 dev_dependencies:
   flutter_test:
