@@ -69,6 +69,12 @@ pub async fn bootstrap_hmac_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let api_key = headers.get("X-Invariant-ApiKey").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
+    
+    // 🛡️ FAST FAIL: Circuit Breaker Check
+    if state.circuit_breaker.is_tripped(api_key).await.unwrap_or(false) {
+        return Err(StatusCode::TOO_MANY_REQUESTS); // Returns 429 when tripped
+    }
+
     let timestamp_str = headers.get("X-Invariant-Timestamp").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
     let nonce = headers.get("X-Invariant-Nonce").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
     let signature = headers.get("X-Invariant-Signature").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
@@ -78,6 +84,7 @@ pub async fn bootstrap_hmac_middleware(
     let server_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     if client_ts.abs_diff(server_ts) > 300 {
+        let _ = state.circuit_breaker.record_failure(api_key).await;
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -121,6 +128,7 @@ pub async fn bootstrap_hmac_middleware(
     if !is_new {
         let storage = crate::db::PostgresStorage::new(state.pool.clone());
         storage.insert_client_audit(None, Some(record.client_id), "replay_attempt", Some("nonce replay (bootstrap)"), None).await;
+        let _ = state.circuit_breaker.record_failure(api_key).await;
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -151,8 +159,11 @@ pub async fn bootstrap_hmac_middleware(
     if mac.verify_slice(&decoded_sig).is_err() {
         let storage = crate::db::PostgresStorage::new(state.pool.clone());
         storage.insert_client_audit(None, Some(record.client_id), "hmac_failure", Some("signature mismatch (bootstrap)"), None).await;
+        let _ = state.circuit_breaker.record_failure(api_key).await;
         return Err(StatusCode::UNAUTHORIZED); 
     }
+
+    let _ = state.circuit_breaker.record_success(api_key).await;
 
     let mut req = Request::from_parts(parts, axum::body::Body::from(bytes));
     req.extensions_mut().insert(ValidatedClient {
@@ -173,6 +184,12 @@ pub async fn verify_hmac_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let api_key = headers.get("X-Invariant-ApiKey").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
+    
+    // 🛡️ FAST FAIL: Circuit Breaker Check
+    if state.circuit_breaker.is_tripped(api_key).await.unwrap_or(false) {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+
     let timestamp_str = headers.get("X-Invariant-Timestamp").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
     let nonce = headers.get("X-Invariant-Nonce").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
     let signature = headers.get("X-Invariant-Signature").and_then(|v| v.to_str().ok()).ok_or(StatusCode::UNAUTHORIZED)?;
@@ -183,6 +200,7 @@ pub async fn verify_hmac_middleware(
     let server_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     if client_ts.abs_diff(server_ts) > 300 {
+        let _ = state.circuit_breaker.record_failure(api_key).await;
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -291,6 +309,7 @@ pub async fn verify_hmac_middleware(
     if !is_new {
         let storage = crate::db::PostgresStorage::new(state.pool.clone());
         storage.insert_client_audit(None, Some(record.client_id), "replay_attempt", Some("nonce replay (data plane)"), None).await;
+        let _ = state.circuit_breaker.record_failure(api_key).await;
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -322,6 +341,7 @@ pub async fn verify_hmac_middleware(
     if mac.verify_slice(&decoded_sig).is_err() {
         let storage = crate::db::PostgresStorage::new(state.pool.clone());
         storage.insert_client_audit(None, Some(record.client_id), "hmac_failure", Some("signature mismatch (data plane)"), None).await;
+        let _ = state.circuit_breaker.record_failure(api_key).await;
         if !is_shadow { return Err(StatusCode::UNAUTHORIZED); }
     }
 

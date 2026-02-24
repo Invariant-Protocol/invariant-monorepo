@@ -1,3 +1,4 @@
+// crates/invariant_server/src/handlers/genesis.rs
 /*
  * Copyright (c) 2026 Invariant Protocol.
  *
@@ -11,10 +12,12 @@ use std::net::SocketAddr;
 use invariant_shared::GenesisRequest;
 use crate::state::SharedState;
 use crate::error_response::AppError;
+use crate::auth::ValidatedClient; // 🛡️ NEW: Extracted from middleware
 use tracing::{error, info, warn, instrument};
 use rand::{Rng, thread_rng};
 use redis::AsyncCommands; 
 use sha2::{Sha256, Digest}; 
+use invariant_engine::EngineError; // 🛡️ NEW: Needed to check specific failure modes
 
 const NONCE_TTL_SECONDS: u64 = 300; 
 const CONFIG_KEY_PAUSED: &str = "invariant:config:genesis_paused";
@@ -86,9 +89,8 @@ pub async fn get_challenge_handler(
         (status = 503, description = "Genesis Paused")
     )
 )]
-// 🚀 FIX: Skip full payload to avoid log crash. Use metadata fields.
 #[instrument(
-    skip(state, payload), 
+    skip(state, client, payload), 
     fields(
         nonce_prefix = tracing::field::Empty, 
         chain_len = tracing::field::Empty, 
@@ -97,6 +99,7 @@ pub async fn get_challenge_handler(
 )]
 pub async fn genesis_handler(
     Extension(state): Extension<SharedState>,
+    Extension(client): Extension<ValidatedClient>, // 🛡️ NEW: Track the client for Circuit Breaking
     Json(payload): Json<GenesisRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     
@@ -134,6 +137,7 @@ pub async fn genesis_handler(
 
     match state.engine.process_genesis(payload).await {
         Ok(identity) => {
+            let _ = state.circuit_breaker.record_success(&client.api_key).await;
             info!("✅ Genesis Success! Minted: {}", identity.id);
             Ok((StatusCode::CREATED, Json(serde_json::json!({ 
                 "id": identity.id,
@@ -143,6 +147,10 @@ pub async fn genesis_handler(
         },
         Err(e) => {
             error!("❌ Genesis Rejected: {}", e);
+            // 🛡️ Log hardware attestation bypass attempts
+            if matches!(e, EngineError::InvalidAttestation(_)) {
+                let _ = state.circuit_breaker.record_failure(&client.api_key).await;
+            }
             Err(e.into())
         },
     }
@@ -156,9 +164,8 @@ pub async fn genesis_handler(
         (status = 200, description = "Verification Result", body = inline(serde_json::Value))
     )
 )]
-// 🚀 FIX: Apply same structured logging to stateless verify
 #[instrument(
-    skip(state, payload), 
+    skip(state, client, payload), 
     fields(
         nonce_prefix = tracing::field::Empty, 
         chain_len = tracing::field::Empty, 
@@ -167,6 +174,7 @@ pub async fn genesis_handler(
 )]
 pub async fn verify_stateless_handler(
     Extension(state): Extension<SharedState>,
+    Extension(client): Extension<ValidatedClient>, // 🛡️ NEW: Track the client for Circuit Breaking
     Json(payload): Json<GenesisRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     
@@ -198,6 +206,7 @@ pub async fn verify_stateless_handler(
         Some(&payload.nonce)
     ) {
         Ok(metadata) => {
+            let _ = state.circuit_breaker.record_success(&client.api_key).await;
             info!("🔍 Stateless Verification: {} - {}", metadata.trust_tier, metadata.product.as_deref().unwrap_or("Unknown"));
             
             Ok((StatusCode::OK, Json(serde_json::json!({
@@ -212,6 +221,8 @@ pub async fn verify_stateless_handler(
         },
         Err(e) => {
             warn!("⚠️ Stateless Verification Failed: {}", e);
+            let _ = state.circuit_breaker.record_failure(&client.api_key).await; // 🛡️ Record Failure
+            
             Ok((StatusCode::OK, Json(serde_json::json!({
                 "verified": false,
                 "tier": "REJECTED",

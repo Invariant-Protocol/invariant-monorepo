@@ -15,8 +15,9 @@ mod handlers;
 mod error_response; 
 mod api_docs;      
 mod services { pub mod push; }
-mod kms;            // 🛡️ NEW
-mod rate_limiter;   // 🛡️ NEW
+mod kms;            
+mod rate_limiter;   
+mod circuit_breaker; // 🛡️ NEW
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ use crate::db::PostgresStorage;
 use crate::impls::RedisNonceManager; 
 use crate::state::AppState;
 use crate::rate_limiter::RateLimiter;
+use crate::circuit_breaker::CircuitBreaker;
 
 use aws_config;
 use aws_sdk_kms::Client as KmsClient;
@@ -92,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "🚀 Booting Invariant Node"
     );
 
-    // 🛡️ KMS & Envelope Encryption Initialization (Fix: BehaviorVersion used)
+    // 🛡️ KMS & Envelope Encryption Initialization
     let aws_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let kms_client = KmsClient::new(&aws_config);
     
@@ -110,8 +112,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine_config = EngineConfig { network, genesis_version };
     let engine = InvariantEngine::new(storage, nonce_manager, engine_config);
 
-    // 🛡️ Token-Bucket Rate Limiter
+    // 🛡️ Protection Services
     let rate_limiter = RateLimiter::new(redis_client.clone());
+    
+    // Default Circuit Breaker: Trip after 50 failures in 5 minutes. Cooldown for 15 minutes.
+    let circuit_breaker = CircuitBreaker::new(redis_client.clone(), 50, 300, 900);
 
     let state = Arc::new(AppState { 
         engine,
@@ -120,7 +125,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         admin_secret,
         kms_client,
         key_cache,
-        rate_limiter
+        rate_limiter,
+        circuit_breaker
     });
 
     let worker_storage = PostgresStorage::new(pool.clone());
@@ -155,7 +161,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     tracing::info!(event = "server_listening", address = %addr, "Invariant Native mTLS Server actively listening");
     
-    // NATIVE TLS ENFORCEMENT: The certificates configured here act as the physical bouncer.
     let config = tls::build_tls_config(
         "certs/server.crt",
         "certs/server.key",

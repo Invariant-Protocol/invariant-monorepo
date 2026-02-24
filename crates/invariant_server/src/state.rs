@@ -14,6 +14,7 @@ use invariant_engine::InvariantEngine;
 use crate::db::PostgresStorage;
 use crate::impls::RedisNonceManager;
 use crate::rate_limiter::RateLimiter;
+use crate::circuit_breaker::CircuitBreaker;
 use redis::Client as RedisClient;
 use sqlx::PgPool;
 
@@ -34,4 +35,7 @@ pub struct AppState {
 
     // Rate limiter wrapper for Redis token bucket
     pub rate_limiter: RateLimiter,
+    
+    // 🛡️ NEW: Circuit Breaker for fuzzing defense
+    pub circuit_breaker: CircuitBreaker,
 }
