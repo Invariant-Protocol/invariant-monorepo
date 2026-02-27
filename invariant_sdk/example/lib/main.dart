@@ -2,10 +2,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:invariant_sdk/invariant_sdk.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // 🛡️ Import dotenv
 import 'dart:async';
 import 'dart:math';
 
-void main() {
+// 🛡️ Load the environment variables before running the app
+Future<void> main() async {
+  await dotenv.load(fileName: ".env");
   runApp(const OperationalDashboardApp());
 }
 
@@ -30,7 +33,9 @@ class OperationalDashboardApp extends StatelessWidget {
   }
 }
 
-// --- 1. SERVICES & LOGIC LAYER ---
+// ============================================================================
+// SERVICES & LOGIC LAYER
+// ============================================================================
 
 enum SimulationMode {
   realNetwork,
@@ -121,7 +126,9 @@ class TelemetryManager {
   }
 }
 
-// --- 2. UI LAYER ---
+// ============================================================================
+// UI LAYER
+// ============================================================================
 
 class TerminalScreen extends StatefulWidget {
   const TerminalScreen({super.key});
@@ -149,12 +156,22 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
 
     _telemetry.addLog("SYSTEM", "Initializing Invariant SDK...");
     
-    // 🛡️ Clean Partner Integration: Only the authorization identity is provided.
-    // The mTLS certificate is securely loaded internally.
+    // 🛡️ Load credentials from .env safely
+    final apiKey = dotenv.env['INVARIANT_API_KEY'] ?? '';
+    final hmacSecret = dotenv.env['INVARIANT_HMAC_SECRET'] ?? '';
+
+    if (apiKey.isEmpty || hmacSecret.isEmpty) {
+      _telemetry.addLog("CRITICAL", "Missing API Key or HMAC Secret in .env");
+      setState(() {
+        _statusDisplay = "CONFIG_ERROR";
+      });
+      return;
+    }
+
     Invariant.initialize(
-      apiKey: "pk_live_pilot_evaluation",
-      hmacSecret: "mock_hmac_secret_for_ui_testing",
-      mode: InvariantMode.shadow,
+      apiKey: apiKey,
+      hmacSecret: hmacSecret,
+      mode: InvariantMode.shadow, // Keeps it from blocking you entirely if there's a minor error
     );
     
     _telemetry.addLog("SDK", "Ready. Mode: SHADOW.");
@@ -313,7 +330,9 @@ class _TerminalScreenState extends State<TerminalScreen> with SingleTickerProvid
   }
 }
 
-// --- 3. WIDGET COMPONENTS ---
+// ============================================================================
+// WIDGET COMPONENTS
+// ============================================================================
 
 class HeaderControlPanel extends StatelessWidget {
   final SimulationMode currentMode;

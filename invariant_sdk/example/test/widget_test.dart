@@ -1,7 +1,7 @@
 // invariant_sdk/example/test/widget_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:invariant_sdk_example/main.dart'; // Ensure this matches your package name in pubspec.yaml
+import 'package:invariant_app/main.dart'; // Ensure this matches your package name in pubspec.yaml
 
 void main() {
   testWidgets('Verify Operational Dashboard loads', (WidgetTester tester) async {

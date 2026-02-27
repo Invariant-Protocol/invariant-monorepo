@@ -49,3 +49,4 @@ crates/invariant_admin
 .env
 firebase_credentials.json
 /certs_backup_legacy
+admin_keygen.dart
