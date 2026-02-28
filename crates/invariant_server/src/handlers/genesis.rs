@@ -12,12 +12,12 @@ use std::net::SocketAddr;
 use invariant_shared::GenesisRequest;
 use crate::state::SharedState;
 use crate::error_response::AppError;
-use crate::auth::ValidatedClient; // 🛡️ NEW: Extracted from middleware
+use crate::auth::ValidatedClient; 
 use tracing::{error, info, warn, instrument};
 use rand::{Rng, thread_rng};
 use redis::AsyncCommands; 
 use sha2::{Sha256, Digest}; 
-use invariant_engine::EngineError; // 🛡️ NEW: Needed to check specific failure modes
+use invariant_engine::EngineError; 
 
 const NONCE_TTL_SECONDS: u64 = 300; 
 const CONFIG_KEY_PAUSED: &str = "invariant:config:genesis_paused";
@@ -99,7 +99,7 @@ pub async fn get_challenge_handler(
 )]
 pub async fn genesis_handler(
     Extension(state): Extension<SharedState>,
-    Extension(client): Extension<ValidatedClient>, // 🛡️ NEW: Track the client for Circuit Breaking
+    Extension(client): Extension<ValidatedClient>,
     Json(payload): Json<GenesisRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     
@@ -147,7 +147,6 @@ pub async fn genesis_handler(
         },
         Err(e) => {
             error!("❌ Genesis Rejected: {}", e);
-            // 🛡️ Log hardware attestation bypass attempts
             if matches!(e, EngineError::InvalidAttestation(_)) {
                 let _ = state.circuit_breaker.record_failure(&client.api_key).await;
             }
@@ -174,7 +173,7 @@ pub async fn genesis_handler(
 )]
 pub async fn verify_stateless_handler(
     Extension(state): Extension<SharedState>,
-    Extension(client): Extension<ValidatedClient>, // 🛡️ NEW: Track the client for Circuit Breaking
+    Extension(client): Extension<ValidatedClient>, 
     Json(payload): Json<GenesisRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     
@@ -207,21 +206,27 @@ pub async fn verify_stateless_handler(
     ) {
         Ok(metadata) => {
             let _ = state.circuit_breaker.record_success(&client.api_key).await;
-            info!("🔍 Stateless Verification: {} - {}", metadata.trust_tier, metadata.product.as_deref().unwrap_or("Unknown"));
+            
+            // 🛡️ MERGE LOGIC FOR STATELESS VERIFY: Apply Software Fallbacks
+            let final_brand = metadata.brand.or(payload.software_brand);
+            let final_device = metadata.device.or(payload.software_model);
+            let final_product = metadata.product.or(payload.software_product);
+
+            info!("🔍 Stateless Verification: {} - {}", metadata.trust_tier, final_product.as_deref().unwrap_or("Unknown"));
             
             Ok((StatusCode::OK, Json(serde_json::json!({
                 "verified": true,
                 "tier": metadata.trust_tier,
-                "brand": metadata.brand,
-                "device_model": metadata.device,
-                "product": metadata.product,
+                "brand": final_brand,
+                "device_model": final_device,
+                "product": final_product,
                 "boot_locked": metadata.is_boot_locked,
                 "risk_score": 0.0
             }))))
         },
         Err(e) => {
             warn!("⚠️ Stateless Verification Failed: {}", e);
-            let _ = state.circuit_breaker.record_failure(&client.api_key).await; // 🛡️ Record Failure
+            let _ = state.circuit_breaker.record_failure(&client.api_key).await; 
             
             Ok((StatusCode::OK, Json(serde_json::json!({
                 "verified": false,

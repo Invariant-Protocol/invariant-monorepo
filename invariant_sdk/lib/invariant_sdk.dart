@@ -9,7 +9,6 @@ import 'src/models.dart';
 export 'src/models.dart';
 
 /// The primary interface for the Invariant Protocol SDK.
-///
 /// Exposes initialization and hardware verification methods to the integrating application.
 class Invariant {
   static ApiClient? _client;
@@ -17,8 +16,6 @@ class Invariant {
   
   static const MethodChannel _channel = MethodChannel('com.invariant.protocol/keystore');
 
-  /// Configures the SDK with the integrating partner's credentials.
-  /// Must be called prior to invoking [verifyDevice].
   static void initialize({
     required String apiKey,
     required String hmacSecret,
@@ -34,10 +31,6 @@ class Invariant {
     _verificationService = VerificationService(_client!, mode);
   }
 
-  /// Initiates the hardware attestation flow.
-  ///
-  /// Requests a nonce from the server, commands the Android Keystore to generate
-  /// an attested keypair, and submits the resulting certificate chain for verification.
   static Future<InvariantResult> verifyDevice() async {
     if (_client == null || _verificationService == null) {
       return InvariantResult.deny("SDK not initialized. Call Invariant.initialize() first.");
@@ -60,6 +53,9 @@ class Invariant {
       "public_key": hardwareResult['publicKey'],         
       "attestation_chain": hardwareResult['attestationChain'], 
       "nonce": _client!.hexToBytes(nonce),
+      "software_brand": hardwareResult['softwareBrand'],
+      "software_model": hardwareResult['softwareModel'],
+      "software_product": hardwareResult['softwareProduct'],
     };
 
     return await _verificationService!.executeVerification(payload);

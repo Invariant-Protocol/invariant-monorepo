@@ -69,28 +69,22 @@ class InvariantSdkPlugin: FlutterPlugin, MethodCallHandler {
         return keyguardManager.isDeviceSecure
     }
 
-    /**
-     * Executes Graceful Degradation:
-     * 1. StrongBox + HW IDs
-     * 2. TEE + HW IDs
-     * 3. TEE only (Software IDs fallback)
-     */
     private fun executeHardwareAttestation(nonceHex: String): Map<String, Any> {
         val challengeBytes = hexStringToByteArray(nonceHex)
         val kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
         
-        // ATTEMPT 1: Titanium (StrongBox)
+        // 1. Titanium (StrongBox)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && 
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)) {
             try {
-                Log.i(TAG, "Attempting TITANIUM Attestation (with HW IDs)")
+                Log.i(TAG, "Attempting TITANIUM Attestation")
                 return generateKeyPair(kpg, challengeBytes, useStrongBox = true, includeProps = true)
             } catch (e: Exception) {
                 Log.w(TAG, "TITANIUM failed. Degrading to STEEL.")
             }
         }
 
-        // ATTEMPT 2: Steel (TEE) with Hardware IDs
+        // 2. Steel (TEE) with Hardware IDs
         try {
             Log.i(TAG, "Attempting STEEL Attestation (with HW IDs)")
             return generateKeyPair(kpg, challengeBytes, useStrongBox = false, includeProps = true)
@@ -98,7 +92,7 @@ class InvariantSdkPlugin: FlutterPlugin, MethodCallHandler {
             Log.w(TAG, "TEE rejected HW ID request. Degrading to Base TEE.")
         }
 
-        // ATTEMPT 3: Steel (TEE) without Hardware IDs
+        // 3. Steel (TEE) without Hardware IDs (Software ID Fallback)
         Log.i(TAG, "Attempting Base STEEL Attestation (Software ID Fallback)")
         return generateKeyPair(kpg, challengeBytes, useStrongBox = false, includeProps = false)
     }
@@ -112,7 +106,7 @@ class InvariantSdkPlugin: FlutterPlugin, MethodCallHandler {
         val builder = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN)
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setAttestationChallenge(challenge)
-            .setUserAuthenticationRequired(true)
+            .setUserAuthenticationRequired(true) // 🛡️ Fixes the "No Auth" rejection
 
         if (useStrongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             builder.setIsStrongBoxBacked(true)
@@ -143,9 +137,9 @@ class InvariantSdkPlugin: FlutterPlugin, MethodCallHandler {
         return mapOf(
             "publicKey" to publicKeyBytes, 
             "attestationChain" to chainList,
-            "softwareBrand" to Build.BRAND,       // Extracted for Rust Fallback
-            "softwareModel" to Build.MODEL,       // Extracted for Rust Fallback
-            "softwareProduct" to Build.PRODUCT,   // Extracted for Rust Fallback
+            "softwareBrand" to Build.BRAND,       
+            "softwareModel" to Build.MODEL,       
+            "softwareProduct" to Build.PRODUCT,   
             "tier" to if (useStrongBox) "TITANIUM" else "STEEL"
         )
     }

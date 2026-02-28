@@ -54,6 +54,12 @@ impl<S: IdentityStorage, N: NonceStorage> InvariantEngine<S, N> {
             Some(&request.nonce)
         )?;
 
+        // 🛡️ MERGE LOGIC: Hardware Truth > Software Fallback
+        // If the TEE didn't provide hardware IDs, we gracefully degrade to the OS-reported strings.
+        let final_brand = metadata.brand.or(request.software_brand);
+        let final_device = metadata.device.or(request.software_model);
+        let final_product = metadata.product.or(request.software_product);
+
         // 3. Construct Identity
         let now = Utc::now();
         let identity = Identity {
@@ -69,9 +75,10 @@ impl<S: IdentityStorage, N: NonceStorage> InvariantEngine<S, N> {
             last_attestation: now, // 🛡️ Initialize Trust Timer
             status: IdentityStatus::Active,
             
-            hardware_brand: metadata.brand,
-            hardware_device: metadata.device,
-            hardware_product: metadata.product,
+            // Assign the resolved metadata
+            hardware_brand: final_brand,
+            hardware_device: final_device,
+            hardware_product: final_product,
             
             genesis_version: self.config.genesis_version,
             network: self.config.network.clone(),
@@ -95,16 +102,11 @@ impl<S: IdentityStorage, N: NonceStorage> InvariantEngine<S, N> {
         }
 
         // 🛡️ 1. NONCE FINALITY (Anti-Replay)
-        // We enforce single-use nonces ATOMICALLY via the nonce_storage (Redis).
-        // This prevents race conditions where DB might not have synced yet.
-        // TTL = 300s (5 mins) covers the challenge validity window.
         if !self.nonce_storage.consume_nonce(&heartbeat.nonce, 300).await? {
             return Err(EngineError::ReplayDetected);
         }
 
         // 🛡️ 2. TRUST DECAY CHECK (Anti-Rooting Persistence)
-        // If the last hardware proof is too old, we require a refresh.
-        // This prevents a compromised device from mining indefinitely.
         let days_since_attest = Utc::now()
             .signed_duration_since(identity.last_attestation)
             .num_days();
@@ -153,7 +155,6 @@ impl<S: IdentityStorage, N: NonceStorage> InvariantEngine<S, N> {
     }
 
     /// 🛡️ NEW: Trust Refresh Handler
-    /// Upgrades a 'Stale' identity back to 'Active' by verifying fresh hardware proofs.
     pub async fn process_reattestation(&self, request: ReAttestationRequest) -> Result<(), EngineError> {
         // 1. Verify Binding (Identity must exist)
         let mut identity = self.storage.get_identity(&request.id).await?
@@ -165,7 +166,6 @@ impl<S: IdentityStorage, N: NonceStorage> InvariantEngine<S, N> {
         }
 
         // 3. Verify Hardware Attestation (Expensive)
-        // This fails if bootloader was unlocked or OS downgraded since Genesis.
         attestation::validate_attestation_chain(
             &request.attestation_chain, 
             &request.public_key,
