@@ -1,9 +1,6 @@
 // crates/invariant_server/src/handlers/mod.rs
 /*
  * Copyright (c) 2026 Invariant Protocol.
- *
- * This source code is licensed under the Business Source License (BSL 1.1) 
- * found in the LICENSE.md file in the root directory of this source tree.
  */
 
 use axum::{Router, routing::{get, post}, extract::Path, http::{StatusCode, HeaderValue, header}, Extension, Json, middleware};
@@ -36,7 +33,6 @@ async fn check_identity_handler(
 ) -> impl axum::response::IntoResponse {
     match state.engine.get_storage().get_identity(&id).await {
         Ok(Some(identity)) => {
-            // Logic requires chrono::Duration for DB comparison
             let next_available = identity.last_heartbeat + chrono::Duration::minutes(1380);
             (
                 StatusCode::OK,
@@ -74,7 +70,6 @@ fn build_security_headers() -> ServiceBuilder<tower::layer::util::Stack<SetRespo
 }
 
 pub fn app_router(state: SharedState) -> Router {
-    // 🛡️ DATA PLANE: Requires mTLS (SDK Identity) AND HMAC (Partner Identity)
     let sensitive_routes = Router::new()
         .route("/genesis", post(genesis::genesis_handler))
         .route("/verify", post(genesis::verify_stateless_handler)) 
@@ -83,11 +78,11 @@ pub fn app_router(state: SharedState) -> Router {
         .route("/identity/:id/manifest", get(identity::get_manifest_handler))
         .layer(middleware::from_fn(auth::verify_hmac_middleware));
 
-    // 🛡️ CONTROL PLANE: Requires Master Secret
     let admin_routes = Router::new()
         .route("/keys/generate", post(admin::generate_client_key_handler))
         .route("/keys/revoke", post(admin::revoke_client_key_handler))
         .route("/keys/list", get(admin::list_client_keys_handler))
+        .route("/keys/migrate-legacy", post(admin::migrate_legacy_secrets_handler)) // 🛡️ NEW MIGRATION ROUTE
         .route("/keys/:client_id/rotate-secret", post(secrets::rotate_hmac_secret_handler))
         .layer(middleware::from_fn(auth::admin_auth_middleware));
 

@@ -18,15 +18,7 @@ import android.security.keystore.KeyInfo
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.KeyFactory
-import java.security.InvalidAlgorithmParameterException
 
-/**
- * InvariantSdkPlugin
- *
- * Bridges the Flutter SDK to the Android Keystore API to perform hardware-backed
- * key generation and remote attestation. Ensures that cryptographic material is
- * bound to physical silicon (TEE or StrongBox).
- */
 class InvariantSdkPlugin: FlutterPlugin, MethodCallHandler {
     private lateinit var channel : MethodChannel
     private lateinit var context: Context 
@@ -72,54 +64,55 @@ class InvariantSdkPlugin: FlutterPlugin, MethodCallHandler {
         channel.setMethodCallHandler(null)
     }
 
-    /**
-     * Verifies that the Android device has a secure lock screen enabled (PIN, pattern, or password).
-     * This is a prerequisite for generating high-assurance keys in the Keystore.
-     */
     private fun isDeviceSecure(): Boolean {
         val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         return keyguardManager.isDeviceSecure
     }
 
     /**
-     * Orchestrates the hardware attestation flow.
-     * * Attempts to generate a StrongBox-backed key first to attain the highest trust tier.
-     * If the hardware does not support StrongBox, it falls back to a standard TEE-backed key.
+     * Executes Graceful Degradation:
+     * 1. StrongBox + HW IDs
+     * 2. TEE + HW IDs
+     * 3. TEE only (Software IDs fallback)
      */
     private fun executeHardwareAttestation(nonceHex: String): Map<String, Any> {
         val challengeBytes = hexStringToByteArray(nonceHex)
         val kpg = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
         
+        // ATTEMPT 1: Titanium (StrongBox)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && 
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)) {
             try {
-                Log.i(TAG, "Initiating TITANIUM (StrongBox) Attestation")
+                Log.i(TAG, "Attempting TITANIUM Attestation (with HW IDs)")
                 return generateKeyPair(kpg, challengeBytes, useStrongBox = true, includeProps = true)
             } catch (e: Exception) {
-                Log.w(TAG, "StrongBox generation failed. Falling back to STEEL tier.")
+                Log.w(TAG, "TITANIUM failed. Degrading to STEEL.")
             }
         }
 
-        Log.i(TAG, "Initiating STEEL (TEE) Attestation")
+        // ATTEMPT 2: Steel (TEE) with Hardware IDs
+        try {
+            Log.i(TAG, "Attempting STEEL Attestation (with HW IDs)")
+            return generateKeyPair(kpg, challengeBytes, useStrongBox = false, includeProps = true)
+        } catch (e: Exception) {
+            Log.w(TAG, "TEE rejected HW ID request. Degrading to Base TEE.")
+        }
+
+        // ATTEMPT 3: Steel (TEE) without Hardware IDs
+        Log.i(TAG, "Attempting Base STEEL Attestation (Software ID Fallback)")
         return generateKeyPair(kpg, challengeBytes, useStrongBox = false, includeProps = false)
     }
 
-    /**
-     * Configures the KeyGenParameterSpec and generates the ECDSA key pair.
-     * Extracts the public key and the X.509 attestation certificate chain.
-     */
     private fun generateKeyPair(
         kpg: KeyPairGenerator, 
         challenge: ByteArray, 
         useStrongBox: Boolean, 
         includeProps: Boolean
     ): Map<String, Any> {
-        val builder = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_SIGN
-        )
+        val builder = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN)
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setAttestationChallenge(challenge)
+            .setUserAuthenticationRequired(true)
 
         if (useStrongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             builder.setIsStrongBoxBacked(true)
@@ -150,15 +143,13 @@ class InvariantSdkPlugin: FlutterPlugin, MethodCallHandler {
         return mapOf(
             "publicKey" to publicKeyBytes, 
             "attestationChain" to chainList,
-            "softwareBrand" to Build.MANUFACTURER,
-            "softwareModel" to Build.MODEL,
+            "softwareBrand" to Build.BRAND,       // Extracted for Rust Fallback
+            "softwareModel" to Build.MODEL,       // Extracted for Rust Fallback
+            "softwareProduct" to Build.PRODUCT,   // Extracted for Rust Fallback
             "tier" to if (useStrongBox) "TITANIUM" else "STEEL"
         )
     }
 
-    /**
-     * Converts a hexadecimal string to a byte array for cryptographic operations.
-     */
     private fun hexStringToByteArray(s: String): ByteArray {
         val len = s.length
         val data = ByteArray(len / 2)

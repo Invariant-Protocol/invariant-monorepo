@@ -11,7 +11,7 @@ use rand::distributions::Alphanumeric;
 pub struct ApiClientRecord {
     pub client_id: uuid::Uuid,
     pub api_key: String,
-    pub status: Option<String>, // 🛡️ FIXED: Adjusted to Option<String> to match DB nullability
+    pub status: Option<String>, 
     pub shadow_mode: Option<bool>, 
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -27,13 +27,27 @@ pub struct RevokeKeyRequest {
     pub api_key: String,
 }
 
+#[derive(Serialize)]
+pub struct MigrationResponse {
+    pub migrated_count: u64,
+    pub skipped_count: u64,
+}
+
 pub async fn generate_client_key_handler(
     Extension(state): Extension<SharedState>,
 ) -> Result<(StatusCode, Json<GenerateKeyResponse>), AppError> {
+    let kms_key_id = std::env::var("KMS_CMK_ID").map_err(|_| anyhow::anyhow!("KMS_CMK_ID not configured"))?;
+    
     let api_key: String = thread_rng().sample_iter(&Alphanumeric).take(32).map(char::from).collect();
     let api_key = format!("pk_live_{}", api_key);
 
+    // 1. Generate an alphanumeric string to match Flutter's expected `utf8.encode(hmacSecret)` logic
     let hmac_secret: String = thread_rng().sample_iter(&Alphanumeric).take(64).map(char::from).collect();
+
+    // 2. Explicitly encrypt the UTF-8 bytes to generate the KMS Blob
+    let kms_helper = crate::kms::KmsHelper::new(state.kms_client.clone(), state.key_cache.clone());
+    let ciphertext_blob = kms_helper.encrypt(&kms_key_id, hmac_secret.as_bytes()).await
+        .map_err(|e| anyhow::anyhow!("KMS Encryption failed: {}", e))?;
 
     let default_policy = serde_json::json!({
         "enabled": false,
@@ -49,12 +63,11 @@ pub async fn generate_client_key_handler(
         api_key, default_policy
     )
     .fetch_one(&mut *tx).await.map_err(|e| anyhow::anyhow!("Client Insert Error: {}", e))?;
-
-    let sec_bytes = hmac_secret.as_bytes();
     
+    // 3. Insert the true KMS ciphertext into the database
     sqlx::query!(
         "INSERT INTO api_client_secrets (api_client_id, secret_wrapped) VALUES ($1, $2)",
-        record.client_id, sec_bytes
+        record.client_id, ciphertext_blob
     )
     .execute(&mut *tx).await.map_err(|e| anyhow::anyhow!("Secret Insert Error: {}", e))?;
 
@@ -97,4 +110,44 @@ pub async fn list_client_keys_handler(
     .fetch_all(&state.pool).await.map_err(|e| anyhow::anyhow!("DB Error: {}", e))?;
 
     Ok(Json(records))
+}
+
+/// One-off migration endpoint to repair the V2 migration contamination.
+/// Finds raw plaintext secrets, encrypts them via KMS, and saves the ciphertext.
+pub async fn migrate_legacy_secrets_handler(
+    Extension(state): Extension<SharedState>,
+) -> Result<(StatusCode, Json<MigrationResponse>), AppError> {
+    let kms_key_id = std::env::var("KMS_CMK_ID").map_err(|_| anyhow::anyhow!("KMS_CMK_ID not configured"))?;
+    let kms_helper = crate::kms::KmsHelper::new(state.kms_client.clone(), state.key_cache.clone());
+
+    let records = sqlx::query!("SELECT secret_id, secret_wrapped FROM api_client_secrets WHERE active = true")
+        .fetch_all(&state.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("DB Fetch Error: {}", e))?;
+
+    let mut migrated_count = 0;
+    let mut skipped_count = 0;
+
+    for record in records {
+        // AWS KMS ciphertexts for AES-256 Data Keys are typically ~180+ bytes.
+        // If it's under 150 bytes, it is definitively a raw UTF-8 plaintext string.
+        if record.secret_wrapped.len() < 150 {
+            let ciphertext_blob = kms_helper.encrypt(&kms_key_id, &record.secret_wrapped).await
+                .map_err(|e| anyhow::anyhow!("KMS Encryption failed during migration: {}", e))?;
+
+            sqlx::query!(
+                "UPDATE api_client_secrets SET secret_wrapped = $1 WHERE secret_id = $2",
+                ciphertext_blob, record.secret_id
+            )
+            .execute(&state.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("DB Update Error: {}", e))?;
+
+            migrated_count += 1;
+        } else {
+            skipped_count += 1;
+        }
+    }
+
+    Ok((StatusCode::OK, Json(MigrationResponse { migrated_count, skipped_count })))
 }

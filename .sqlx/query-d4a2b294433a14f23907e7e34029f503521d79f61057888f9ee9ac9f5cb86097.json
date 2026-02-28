@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_client_secrets SET secret_wrapped = $1 WHERE secret_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d4a2b294433a14f23907e7e34029f503521d79f61057888f9ee9ac9f5cb86097"
+}

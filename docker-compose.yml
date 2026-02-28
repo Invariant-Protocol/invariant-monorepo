@@ -1,5 +1,4 @@
 # docker-compose.yml
-
 services:
   db:
     image: postgres:15-alpine
@@ -34,9 +33,6 @@ services:
       dockerfile: Dockerfile.release
     restart: always
     
-    # 🛡️ INJECT ENVIRONMENT VARIABLES
-    # This loads the .env file that was uploaded via your deploy script
-    # and makes ADMIN_API_SECRET available to the Rust binary.
     env_file:
       - .env
 
@@ -47,14 +43,13 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/invariant
       REDIS_URL: redis://redis:6379
-      
       RUST_LOG: invariant_server=info,tower_http=info
       INVARIANT_NETWORK: testnet 
       INVARIANT_GENESIS_VERSION: 1
-      
       FIREBASE_SERVICE_ACCOUNT_PATH: /app/firebase_credentials.json
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
-
+      # 🛡️ ENGAGE LOCAL ENCRYPTION BYPASS
+      KMS_CMK_ID: local
     ports:
       - "8443:8443"
     
@@ -69,9 +64,6 @@ services:
         limits:
           cpus: '1.0'
           memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
 
 volumes:
   postgres_data:

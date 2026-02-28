@@ -50,3 +50,9 @@ crates/invariant_admin
 firebase_credentials.json
 /certs_backup_legacy
 admin_keygen.dart
+pubspec.yaml
+/dart_tool
+pubspec.lock
+.dart_tool/package_config.json
+.dart_tool/package_graph.json
+.dart_tool/version

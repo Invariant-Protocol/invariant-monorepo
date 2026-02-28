@@ -66,10 +66,12 @@ class ApiClient {
   /// This nonce is required by the hardware enclave to prevent replay attacks
   /// during the generation of the attestation signature.
   Future<String?> getChallenge() async {
-    developer.log("Attempting GET $baseUrl/heartbeat/challenge", name: "tech.invariant.sdk");
+    // 🛡️ FIX: Ask for a genesis challenge to match the /verify endpoint
+    developer.log("Attempting GET $baseUrl/genesis/challenge", name: "tech.invariant.sdk");
     try {
       final response = await _client.get(
-        Uri.parse('$baseUrl/heartbeat/challenge'),
+        // 🛡️ FIX: Request routed to /genesis/challenge
+        Uri.parse('$baseUrl/genesis/challenge'),
         headers: {
           'X-Client-Cert-Fingerprint': _certFingerprint,
           'X-Invariant-ApiKey': apiKey,
