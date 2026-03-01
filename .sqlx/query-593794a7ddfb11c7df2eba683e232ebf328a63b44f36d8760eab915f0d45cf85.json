@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_client_certs SET revoked = true WHERE api_client_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "593794a7ddfb11c7df2eba683e232ebf328a63b44f36d8760eab915f0d45cf85"
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT time_bucket, tier, decision, request_count\n        FROM b2b_attestation_metrics\n        WHERE time_bucket >= NOW() - make_interval(days => $1)\n        ORDER BY time_bucket DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "time_bucket",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "tier",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "decision",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "request_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d74f2d626d590c227661690b1c6eb02bd8e374d287d81c63a87eed10f070d61c"
+}

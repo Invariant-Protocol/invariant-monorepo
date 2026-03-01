@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE api_clients SET status = 'revoked', revoked_at = NOW() WHERE client_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "84b7e74b93114dfcf23aad2a460be84cc7ed9136594ea93be6b16242a3cac2f9"
+}

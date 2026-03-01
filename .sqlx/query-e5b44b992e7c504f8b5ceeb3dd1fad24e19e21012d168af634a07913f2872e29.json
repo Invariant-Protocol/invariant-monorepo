@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT u.id as user_id, ou.role::text as role_str\n        FROM b2b_users u\n        JOIN b2b_organization_users ou ON u.id = ou.user_id\n        WHERE u.ext_id = $1 AND ou.org_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "role_str",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "e5b44b992e7c504f8b5ceeb3dd1fad24e19e21012d168af634a07913f2872e29"
+}

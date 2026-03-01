@@ -44,6 +44,8 @@ crates/invariant_admin
 **/certs/*.csr
 **/certs/*.srl
 **/certs/*.p12
+certs
+INVARIANT_AUDIT_REPORT.json
 
 # Ignore environment-specific secrets
 .env
@@ -56,3 +58,8 @@ pubspec.lock
 .dart_tool/package_config.json
 .dart_tool/package_graph.json
 .dart_tool/version
+# .gitignore
+certs/
+firebase_credentials.json
+artifacts/
+target/

@@ -5,6 +5,7 @@ members = [
     "crates/invariant_shared",
     "crates/invariant_engine",
     "crates/invariant_server",
+    "crates/invariant_b2b", # 👈 NEW: Linked B2B Service
 ]
 
 [workspace.package]

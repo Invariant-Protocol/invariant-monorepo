@@ -1,0 +1,31 @@
+# crates/invariant_b2b/Cargo.toml
+[package]
+name = "invariant_b2b"
+version.workspace = true
+edition.workspace = true
+license = "BSL-1.1"
+
+[dependencies]
+invariant_shared = { path = "../invariant_shared" }
+
+tokio = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tower = { workspace = true }
+sqlx = { workspace = true }
+redis = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+jsonwebtoken = "9.2"
+
+# 🛡️ Needed for the Outbox Worker to encrypt secrets
+aes-gcm = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
